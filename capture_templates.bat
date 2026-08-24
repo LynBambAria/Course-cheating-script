@@ -20,12 +20,12 @@ echo 已记录: %POS2%
 echo.
 echo 正在截取弹窗...
 python -c ^
-"import pyautogui, shutil; from pathlib import Path; ^
+"import pyautogui, shutil, sys; from pathlib import Path; ^
 p1='%POS1%'.split(':')[1].split(','); p2='%POS2%'.split(':')[1].split(','); ^
 left=int(p1[0]); top=int(p1[1]); right=int(p2[0]); bottom=int(p2[1]); ^
 w=abs(right-left); h=abs(bottom-top); ^
 left=min(left,right); top=min(top,bottom); ^
-td=Path(r'C:\Users\wenshun.yin\.psacowork\workspace\20260824121528\templates'); td.mkdir(exist_ok=True); ^
+td=Path(r'%~dp0templates'); td.mkdir(exist_ok=True); ^
 img=pyautogui.screenshot(region=(left,top,w,h)); img.save(str(td/'task_complete.png')); ^
 print(f'弹窗截图已保存: ({left},{top},{w},{h})')"
 echo.
@@ -43,12 +43,12 @@ echo 已记录: %POS4%
 echo.
 echo 正在截取按钮...
 python -c ^
-"import pyautogui, shutil; from pathlib import Path; ^
+"import pyautogui, shutil, sys; from pathlib import Path; ^
 p3='%POS3%'.split(':')[1].split(','); p4='%POS4%'.split(':')[1].split(','); ^
 left=int(p3[0]); top=int(p3[1]); right=int(p4[0]); bottom=int(p4[1]); ^
 w=abs(right-left); h=abs(bottom-top); ^
 left=min(left,right); top=min(top,bottom); ^
-td=Path(r'C:\Users\wenshun.yin\.psacowork\workspace\20260824121528\templates'); ^
+td=Path(r'%~dp0templates'); td.mkdir(exist_ok=True); ^
 img=pyautogui.screenshot(region=(left,top,w,h)); img.save(str(td/'next_button.png')); ^
 print(f'按钮截图已保存: ({left},{top},{w},{h})')"
 echo.

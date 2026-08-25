@@ -1,6 +1,6 @@
 """
 自动化打包脚本：将刷课脚本打包为完全独立的 Windows .exe 应用程序
-包含完整 Python 运行时、OpenCV、PyAutoGUI、Pillow、NumPy 及内置模板资源
+包含完整 Python 运行时、OpenCV、PyAutoGUI、Pillow、NumPy、SoundCard 音频内录组件及内置模板资源
 在没有安装 Python 的新机器上双击即可直接运行
 """
 
@@ -53,6 +53,11 @@ def check_and_install_dependencies():
         import cv2
     except ImportError:
         missing.append("opencv-python-headless")
+
+    try:
+        import soundcard
+    except ImportError:
+        missing.append("soundcard")
 
     if not missing:
         print("✅ 所有依赖均已就绪，无需重复安装。\n")
@@ -112,9 +117,15 @@ def build_executable():
         "--hidden-import", "tkinter.ttk",
         "--hidden-import", "tkinter.scrolledtext",
         "--hidden-import", "tkinter.messagebox",
+        "--hidden-import", "soundcard",
+        "--hidden-import", "cffi",
+        "--hidden-import", "_cffi_backend",
+        "--hidden-import", "wave",
         "--collect-all", "cv2",
         "--collect-all", "pyautogui",
         "--collect-all", "PIL",
+        "--collect-all", "soundcard",
+        "--collect-all", "cffi",
         str(BASE_DIR / "auto_course.py")
     ]
 
@@ -130,6 +141,7 @@ def build_executable():
 
     target_exe = DIST_DIR / f"{EXE_NAME}.exe"
     dist_templates = DIST_DIR / "templates"
+    dist_recordings = DIST_DIR / "recordings"
 
     # 同步 templates 文件夹到 dist 目录
     if TEMPLATES_DIR.exists():
@@ -137,6 +149,9 @@ def build_executable():
         for item in TEMPLATES_DIR.glob("*.png"):
             shutil.copy2(item, dist_templates / item.name)
             print(f"已同步模板文件: templates/{item.name} -> dist/templates/")
+
+    # 确保 recordings 目录存在
+    dist_recordings.mkdir(parents=True, exist_ok=True)
 
     # 复制说明文件
     readme_file = BASE_DIR / "README.md"
@@ -153,7 +168,7 @@ def build_executable():
     if target_exe.exists():
         size_mb = target_exe.stat().st_size / (1024 * 1024)
         print(f"\n📁 独立可执行程序产物路径: {target_exe}")
-        print(f"📦 文件大小: {size_mb:.2f} MB (包含全部 Python 运行时与依赖库)")
+        print(f"📦 文件大小: {size_mb:.2f} MB (包含全部 Python 运行时与音频录制依赖库)")
         print(f"💡 该 exe 文件可直接发送给任意 Windows 电脑，无需安装 Python 即可运行！")
 
     return True

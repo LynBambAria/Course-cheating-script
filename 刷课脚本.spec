@@ -3,12 +3,16 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('D:/Course-cheating-script/Course-cheating-script/templates', 'templates')]
 binaries = []
-hiddenimports = ['cv2', 'numpy', 'PIL', 'PIL.ImageGrab', 'pyautogui', 'tkinter', 'tkinter.ttk', 'tkinter.scrolledtext', 'tkinter.messagebox']
+hiddenimports = ['cv2', 'numpy', 'PIL', 'PIL.ImageGrab', 'pyautogui', 'tkinter', 'tkinter.ttk', 'tkinter.scrolledtext', 'tkinter.messagebox', 'soundcard', 'cffi', '_cffi_backend', 'wave']
 tmp_ret = collect_all('cv2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pyautogui')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PIL')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('soundcard')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('cffi')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

@@ -40,7 +40,9 @@ DEFAULT_CHECK_INTERVAL = 4       # 默认主检测循环间隔（秒）
 DEFAULT_POPUP_CONFIDENCE = 0.78  # 弹窗模板匹配置信度（支持多尺度缩放）
 DEFAULT_NEXT_CONFIDENCE = 0.80   # 「下一个」按钮匹配置信度（防误点「上一个」）
 MIN_POPUP_CLICK_INTERVAL = 5     # 切课点击最小防抖间隔（秒）
-DEFAULT_PLAY_COOLDOWN = 15       # 播放按钮点击冷却时间（秒）
+DEFAULT_SWITCH_DELAY = 3.5       # 切课后等待新视频与页面加载时间（秒）
+STATIC_CHECK_CYCLES = 3          # 视频画面静止判定周期（连续 3 次检测静止即判定暂停）
+STATIC_DIFF_THRESHOLD = 0.35     # 画面静止判定灰度差阈值
 EDGE_MATCH_THRESHOLD = 0.58      # 边缘模板匹配置信度阈值
 GEO_CONF_THRESHOLD = 0.85        # 几何识别置信度阈值（严格防文字误判）
 AUDIO_SAMPLE_RATE = 44100        # 音频录制采样率 (Hz)
@@ -51,8 +53,8 @@ DEFAULT_MATCH_SCALES = (0.75, 0.85, 0.92, 1.0, 1.08, 1.18, 1.28)
 # 播放按钮几何识别参数
 PLAY_TRI_MIN_AREA = 120          # 播放三角图标最小面积（像素）
 PLAY_TRI_MAX_AREA = 25000        # 播放三角图标最大面积
-PLAY_TRI_MIN_SIZE = 16           # 播放三角最小宽高（像素）
-PLAY_TRI_ASPECT_MIN = 0.58       # 三角形高宽比下限
+PLAY_TRI_MIN_SIZE = 14           # 播放三角最小宽高（像素）
+PLAY_TRI_ASPECT_MIN = 0.52       # 三角形高宽比下限
 PLAY_TRI_ASPECT_MAX = 1.65       # 三角形高宽比上限
 
 
@@ -624,7 +626,7 @@ class CourseAutoApp:
         )
         config_frame.pack(fill=tk.X, pady=(0, 8))
 
-        # 第 1 行：检测间隔、弹窗置信度、按钮置信度与播放冷却
+        # 第 1 行：检测间隔、弹窗置信度、按钮置信度与切课缓冲时间
         row1 = tk.Frame(config_frame, bg="white")
         row1.pack(fill=tk.X, pady=3)
 
@@ -658,15 +660,15 @@ class CourseAutoApp:
         self.btn_conf_entry.pack(side=tk.LEFT, padx=(4, 2))
         tk.Label(row1, text="(默认0.80)", font=("Microsoft YaHei", 8), bg="white", fg="#888").pack(side=tk.LEFT, padx=(0, 22))
 
-        tk.Label(row1, text="播放冷却:", font=("Microsoft YaHei", 9), bg="white", fg="#444").pack(side=tk.LEFT)
-        self.play_cooldown_var = tk.StringVar(value=str(DEFAULT_PLAY_COOLDOWN))
-        self.play_cooldown_entry = tk.Entry(
-            row1, textvariable=self.play_cooldown_var,
+        tk.Label(row1, text="切课缓冲:", font=("Microsoft YaHei", 9), bg="white", fg="#444").pack(side=tk.LEFT)
+        self.switch_delay_var = tk.StringVar(value=str(DEFAULT_SWITCH_DELAY))
+        self.switch_delay_entry = tk.Entry(
+            row1, textvariable=self.switch_delay_var,
             font=("Microsoft YaHei", 9, "bold"), width=5, justify="center",
             relief="solid", borderwidth=1
         )
-        self.play_cooldown_entry.pack(side=tk.LEFT, padx=(4, 2))
-        tk.Label(row1, text="秒 (默认15)", font=("Microsoft YaHei", 8), bg="white", fg="#888").pack(side=tk.LEFT)
+        self.switch_delay_entry.pack(side=tk.LEFT, padx=(4, 2))
+        tk.Label(row1, text="秒 (默认3.5)", font=("Microsoft YaHei", 8), bg="white", fg="#888").pack(side=tk.LEFT)
 
         # 第 2 行：自动播放开关、识别模式、音频录制开关与打开目录按钮
         row2 = tk.Frame(config_frame, bg="white")
@@ -681,11 +683,11 @@ class CourseAutoApp:
         self.auto_play_cb.pack(side=tk.LEFT, padx=(0, 16))
 
         tk.Label(row2, text="播放模式:", font=("Microsoft YaHei", 9), bg="white", fg="#444").pack(side=tk.LEFT)
-        self.play_mode_var = tk.StringVar(value="智能综合识别 (推荐)")
+        self.play_mode_var = tk.StringVar(value="智能识别 + 中心兜底 (推荐)")
         self.play_mode_cb = ttk.Combobox(
             row2, textvariable=self.play_mode_var,
-            values=["智能综合识别 (推荐)", "视频中心大播放键", "纯几何免模板", "模板匹配优先"],
-            state="readonly", width=18,
+            values=["智能识别 + 中心兜底 (推荐)", "直接点击视频中心", "仅智能识别播放键", "模板匹配优先"],
+            state="readonly", width=22,
             font=("Microsoft YaHei", 9)
         )
         self.play_mode_cb.pack(side=tk.LEFT, padx=(4, 22))
@@ -884,9 +886,9 @@ class CourseAutoApp:
     def find_play_button(self, screen_bgr=None):
         """
         综合查找播放按钮：
-        1. 模式选择分流 (智能综合 / 视频中心大键 / 纯几何免模板 / 模板匹配优先)
-        2. 智能几何拓扑识别（寻找标准播放三角形与同心圆盘/圆角矩形底座）
-        3. 边缘多尺度模板匹配（消除半透明与背景色干扰）
+        1. 智能几何拓扑识别（寻找标准播放三角形与同心圆盘/圆角矩形底座）
+        2. 边缘多尺度模板匹配（消除半透明与背景色干扰）
+        3. 绝不返回模糊坐标
         返回: (center_x, center_y, confidence, method_desc) 或 None
         """
         if screen_bgr is None:
@@ -899,39 +901,30 @@ class CourseAutoApp:
         has_tpl = os.path.exists(play_tpl_path)
         tpl_bgr = cv2.imread(play_tpl_path) if has_tpl else None
 
-        # 模式 1: 视频中心大播放键
-        if "视频中心" in mode:
-            return detect_play_button_geometry(screen_bgr, center_only=True)
-
-        # 模式 2: 纯几何免模板
-        if "纯几何" in mode:
-            return detect_play_button_geometry(screen_bgr, center_only=False)
-
-        # 模式 3: 模板匹配优先
+        # 模式: 模板匹配优先
         if "模板匹配" in mode and tpl_bgr is not None:
             res = match_template_edge_multiscale(screen_bgr, tpl_bgr)
             if res:
                 return res
             return detect_play_button_geometry(screen_bgr, center_only=False)
 
-        # 模式 0 (默认): 智能综合识别（推荐）
-        # 1. 优先检测中心高置信度几何播放圆盘/圆角矩形按键
+        # 模式: 智能识别（优先中心同心圆盘/圆角矩形按键）
         geo_center = detect_play_button_geometry(screen_bgr, center_only=True)
-        if geo_center and geo_center[2] >= 0.88:
+        if geo_center and geo_center[2] >= 0.86:
             return geo_center
 
-        # 2. 若存在模板，执行多尺度边缘匹配
+        # 若存在模板，执行多尺度边缘匹配
         if tpl_bgr is not None:
             edge_res = match_template_edge_multiscale(screen_bgr, tpl_bgr)
             if edge_res and edge_res[2] >= 0.65:
                 return edge_res
 
-        # 3. 广域几何识别（包含控制栏与各类播放按键）
+        # 广域几何识别（包含控制栏与各类播放按键）
         geo_res = detect_play_button_geometry(screen_bgr, center_only=False)
         if geo_res:
             return geo_res
 
-        # 4. 降级尝试普通边缘匹配
+        # 降级尝试普通边缘匹配
         if tpl_bgr is not None:
             return match_template_edge_multiscale(screen_bgr, tpl_bgr, threshold=0.55)
 
@@ -1057,13 +1050,21 @@ class CourseAutoApp:
         else:
             self.log.info("ℹ️ 当前屏幕无需切课（未出现完成弹窗且未亮起独立「下一个」按钮）")
 
-        # 4. 播放按钮诊断
-        play_res = self.find_play_button(screen)
-        if play_res:
-            px, py, conf, method = play_res
-            self.log.info(f"▶ 成功定位播放按钮: 坐标 ({px}, {py}) | 置信度: {conf:.2f} | 策略: {method}")
+        # 4. 播放按钮与触发策略诊断
+        mode = self.play_mode_var.get()
+        if "直接点击视频中心" in mode:
+            cx, cy = w // 2, int(h * 0.48)
+            self.log.info(f"▶ 播放触发策略 [模式: {mode}]: 触发时将直接点击视频中心区域 ({cx}, {cy})")
         else:
-            self.log.info(f"ℹ️ 未检测到播放按钮 [模式: {self.play_mode_var.get()}]（画面可能正在播放中，或无播放图标）")
+            play_res = self.find_play_button(screen)
+            if play_res:
+                px, py, conf, method = play_res
+                self.log.info(f"▶ 成功定位播放按钮: 坐标 ({px}, {py}) | 置信度: {conf:.2f} | 策略: {method}")
+            elif "兜底" in mode or "推荐" in mode:
+                cx, cy = w // 2, int(h * 0.48)
+                self.log.info(f"ℹ️ 未检测到播放图标 [模式: {mode}]: 触发时将自动点击视频中心区域 ({cx}, {cy}) 兜底启动")
+            else:
+                self.log.info(f"ℹ️ 未检测到播放按钮 [模式: {mode}]（画面可能正在播放中，或无播放图标）")
 
         # 5. 音频录制设备诊断
         if HAS_SOUNDCARD:
@@ -1137,30 +1138,83 @@ class CourseAutoApp:
                 self.log.info(f"🎙️ [音频录制] 本节课程录音已保存: {path.name} (时长 {dur_str})")
             self.root.after(0, self._update_record_status, "⏸ 未开启" if not self.auto_record_var.get() else "⏸ 未录制", "#888")
 
-    def click_play_button(self, x, y, method_desc):
-        """安全点击播放按钮并进行防多点、状态确认及触发录音"""
-        pyautogui.click(x, y)
-        self.play_click_count += 1
-        self.last_play_click_time = time.time()
-        self.root.after(0, self._update_counts)
-        self.log.info(f"▶ [{method_desc}] 点击播放按钮 ({x}, {y}) (播放第 {self.play_click_count} 次)")
+    def _extract_video_thumb(self, screen_bgr):
+        """提取屏幕中心视频区域的低分辨率灰度缩略图用于快速运动/静止检测"""
+        if screen_bgr is None:
+            return None
+        try:
+            h, w = screen_bgr.shape[:2]
+            # 截取中心 70% 区域（排除顶部浏览器标签与底部任务栏）
+            roi = screen_bgr[int(h * 0.15):int(h * 0.85), int(w * 0.15):int(w * 0.85)]
+            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            # 缩放至 160x120 极小尺寸，计算耗时 < 0.05ms
+            thumb = cv2.resize(gray_roi, (160, 120), interpolation=cv2.INTER_AREA)
+            return thumb
+        except Exception:
+            return None
 
-        # 点击后延迟 1 秒验证按钮是否消失
-        time.sleep(1.0)
-        verify_screen = self.grab_screen()
-        still_exists = self.find_play_button(verify_screen)
-        if not still_exists:
-            self.log.info("✨ 播放按钮已消失，视频开始播放")
-            self.play_click_attempts = 0
-            self.last_play_coord = None
+    def _is_video_static(self, current_thumb, prev_thumb, threshold=STATIC_DIFF_THRESHOLD):
+        """对比两帧缩略图，判断视频画面是否处于静止不动状态"""
+        if current_thumb is None or prev_thumb is None:
+            return False
+        try:
+            diff = cv2.absdiff(current_thumb, prev_thumb)
+            mean_val = float(np.mean(diff))
+            return mean_val < threshold
+        except Exception:
+            return False
 
-            # 视频开始播放时触发音频录音
-            self.start_audio_recording(self.popup_click_count + 1)
+    def trigger_play_once(self, context_desc="单次播放触发"):
+        """
+        精准单次播放触发：
+        1. 仅在监控启动、切课后或画面持续静止时触发
+        2. 优先通过多尺度模板/几何拓扑识别精准点击播放图标
+        3. 若未识别到图标且开启了中心兜底，自动点击视频区域中心 (W/2, H*0.48) 触发播放
+        4. 联动启动课程音频录制
+        返回: (clicked: bool, detail_desc: str)
+        """
+        if not self.auto_play_var.get():
+            return False, "自动播放未开启"
+
+        screen = self.grab_screen()
+        if screen is None:
+            return False, "无法获取屏幕"
+
+        h, w = screen.shape[:2]
+        mode = self.play_mode_var.get()
+        click_x, click_y = None, None
+        strategy_desc = ""
+
+        # 模式: 直接点击视频中心
+        if "直接点击视频中心" in mode:
+            click_x, click_y = w // 2, int(h * 0.48)
+            strategy_desc = "视频中心区域直接点击"
         else:
-            self.play_click_attempts += 1
-            self.last_play_coord = (x, y)
-            if self.play_click_attempts >= 3:
-                self.log.warning(f"⚠️ 同一位置已连续点击 {self.play_click_attempts} 次未消除，进入防刷保护冷却")
+            # 尝试几何/模板识别播放按钮
+            play_pos = self.find_play_button(screen)
+            if play_pos:
+                px, py, conf, method = play_pos
+                click_x, click_y = px, py
+                strategy_desc = f"{method} (置信度:{conf:.2f})"
+            elif "兜底" in mode or "推荐" in mode:
+                click_x, click_y = w // 2, int(h * 0.48)
+                strategy_desc = "未识别到图标 -> 触发视频中心区域兜底点击"
+
+        if click_x is not None and click_y is not None:
+            pyautogui.click(click_x, click_y)
+            self.play_click_count += 1
+            self.last_play_click_time = time.time()
+            self.root.after(0, self._update_counts)
+            self.log.info(f"▶ [{context_desc}] 触发播放点击 ({click_x}, {click_y}) [{strategy_desc}]")
+
+            # 触发播放后稍作等待，联动启动音频录制
+            time.sleep(0.8)
+            if self.auto_record_var.get() and not self.audio_recorder.recording:
+                self.start_audio_recording(self.popup_click_count + 1)
+            return True, strategy_desc
+        else:
+            self.log.info(f"ℹ️ [{context_desc}] 当前画面未检测到播放按钮且未启用兜底，保持静默")
+            return False, "未检测到播放键"
 
     def click_next(self, x, y, desc=""):
         """点击「下一个」按钮并停止当前小节录音"""
@@ -1172,37 +1226,34 @@ class CourseAutoApp:
         self.root.after(0, self._update_counts)
         self.log.info(f"✅ 点击「下一个」 ({x}, {y}) {f'[{desc}]' if desc else ''} (切课第 {self.popup_click_count} 次)")
 
-    def monitor_loop(self, check_interval, play_cooldown, popup_confidence, btn_confidence):
+    def monitor_loop(self, check_interval, popup_confidence, btn_confidence, switch_delay=DEFAULT_SWITCH_DELAY):
         self.log.info("=" * 45)
-        self.log.info("🚀 刷课监控已启动")
-        self.log.info(f"检测间隔: {check_interval}s | 弹窗阈值: {popup_confidence} | 按钮阈值: {btn_confidence} | 播放冷却: {play_cooldown}s")
+        self.log.info("🚀 刷课监控已启动 (精准单次播放 + 静止防卡顿 + 双轨切课)")
+        self.log.info(f"检测间隔: {check_interval}s | 弹窗阈值: {popup_confidence} | 按钮阈值: {btn_confidence} | 切课缓冲: {switch_delay}s")
         rec_status_str = "已开启 (小节自动切分)" if self.auto_record_var.get() else "未开启 (默认关闭，可手动勾选开启)"
         self.log.info(f"自动播放: {'已开启' if self.auto_play_var.get() else '已禁用'} | 播放模式: {self.play_mode_var.get()} | 音频录制: {rec_status_str}")
+        self.log.info("💡 播放规则: 仅在「启动时」、「切课后」或「画面连续静止暂停」时点击播放，正常播放期间 100% 保持静默！")
         self.log.info("=" * 45)
 
-        # 启动时如果视频已经在播放（未显示播放键），且开启了录音，立即启动第 1 节录音
-        if self.auto_record_var.get() and not self.audio_recorder.recording:
-            init_screen = self.grab_screen()
-            init_play = self.find_play_button(init_screen)
-            if not init_play:
-                self.start_audio_recording(1)
+        # 启动时：仅触发一次播放（若开启自动播放）
+        if self.auto_play_var.get():
+            time.sleep(0.5)
+            self.trigger_play_once("启动初始化")
+        elif self.auto_record_var.get() and not self.audio_recorder.recording:
+            self.start_audio_recording(1)
+
+        prev_video_thumb = None
+        static_cycles = 0
 
         while not self.stop_event.is_set():
             try:
                 now = time.time()
-
-                # ========== 1. 播放按钮检测与触发 ==========
-                if self.auto_play_var.get():
-                    cooldown_needed = play_cooldown if self.play_click_attempts < 3 else (play_cooldown * 2.5)
-                    if now - self.last_play_click_time > cooldown_needed:
-                        screen = self.grab_screen()
-                        play_pos = self.find_play_button(screen)
-                        if play_pos:
-                            px, py, conf, method = play_pos
-                            self.click_play_button(px, py, method)
-
-                # ========== 2. 检测切课目标（全场景双轨多尺度匹配） ==========
                 screen = self.grab_screen()
+                if screen is None:
+                    time.sleep(1)
+                    continue
+
+                # ========== 1. 优先检测切课目标（完成弹窗 / 独立下一个按钮） ==========
                 target = self.find_popup_and_next_button(screen, min_popup_conf=popup_confidence,
                                                          min_btn_conf=btn_confidence)
 
@@ -1224,19 +1275,38 @@ class CourseAutoApp:
                             rtx, rty, rscore, rdesc = re_target
                             self.click_next(rtx, rty, rdesc)
 
-                            # 点击切换后，等待页面加载并主动触发新一节视频播放与录音
-                            time.sleep(3.5)
+                            # 重置画面静止计数器
+                            prev_video_thumb = None
+                            static_cycles = 0
+
+                            # 点击切课后，等待新小节页面与视频播放器加载
+                            self.log.info(f"⏳ 已点击「下一个」，等待 {switch_delay:.1f} 秒页面与新视频加载...")
+                            time.sleep(max(1.0, switch_delay))
+
+                            # 切课后：仅执行一次播放触发
                             if self.auto_play_var.get():
-                                screen_after_next = self.grab_screen()
-                                next_play_pos = self.find_play_button(screen_after_next)
-                                if next_play_pos:
-                                    npx, npy, nconf, nmethod = next_play_pos
-                                    self.click_play_button(npx, npy, f"切课后-{nmethod}")
-                                else:
-                                    # 如果新页面已自动开始播放，直接开启新一节录音
-                                    self.start_audio_recording(self.popup_click_count + 1)
+                                self.trigger_play_once("切课后触发")
+                            elif self.auto_record_var.get() and not self.audio_recorder.recording:
+                                self.start_audio_recording(self.popup_click_count + 1)
+                            continue
                         else:
                             self.log.info("ℹ️ 切课信号二次复检未通过（已自动过滤瞬态闪烁）")
+
+                # ========== 2. 视频静止/暂停检测（防卡顿恢复机制） ==========
+                # 只有在未出现切课信号且开启自动播放时，才进行画面静止检测
+                if self.auto_play_var.get():
+                    curr_thumb = self._extract_video_thumb(screen)
+                    if prev_video_thumb is not None and curr_thumb is not None:
+                        if self._is_video_static(curr_thumb, prev_video_thumb):
+                            static_cycles += 1
+                            if static_cycles >= STATIC_CHECK_CYCLES:
+                                self.log.info(f"⚠️ 视频画面连续 {static_cycles * check_interval} 秒无变动（判定为暂停或卡顿），触发单次播放恢复...")
+                                self.trigger_play_once("画面静止恢复")
+                                static_cycles = 0
+                                prev_video_thumb = None
+                        else:
+                            static_cycles = 0
+                    prev_video_thumb = curr_thumb
 
                 # 间隔休眠等待（支持快速响应停止事件）
                 sleep_steps = max(1, int(check_interval * 2))
@@ -1281,19 +1351,18 @@ class CourseAutoApp:
             btn_conf = DEFAULT_NEXT_CONFIDENCE
         self.btn_conf_var.set(f"{btn_conf:.2f}")
 
-        # 解析播放冷却
+        # 解析切课缓冲时间
         try:
-            cooldown = float(self.play_cooldown_var.get().strip())
-            cooldown = max(2.0, min(120.0, cooldown))
+            switch_delay = float(self.switch_delay_var.get().strip())
+            switch_delay = max(1.0, min(30.0, switch_delay))
         except ValueError:
-            cooldown = DEFAULT_PLAY_COOLDOWN
-        self.play_cooldown_var.set(str(int(cooldown) if cooldown.is_integer() else cooldown))
+            switch_delay = DEFAULT_SWITCH_DELAY
+        self.switch_delay_var.set(f"{switch_delay:.1f}")
 
         self.running = True
         self.stop_event.clear()
         self.popup_click_count = 0
         self.play_click_count = 0
-        self.play_click_attempts = 0
         self.last_popup_click_time = 0
         self.last_play_click_time = 0
         self._update_counts()
@@ -1307,7 +1376,7 @@ class CourseAutoApp:
         self.interval_entry.config(state=tk.DISABLED, bg="#eee")
         self.popup_conf_entry.config(state=tk.DISABLED, bg="#eee")
         self.btn_conf_entry.config(state=tk.DISABLED, bg="#eee")
-        self.play_cooldown_entry.config(state=tk.DISABLED, bg="#eee")
+        self.switch_delay_entry.config(state=tk.DISABLED, bg="#eee")
         self.play_mode_cb.config(state=tk.DISABLED)
         self.auto_play_cb.config(state=tk.DISABLED)
         self.auto_record_cb.config(state=tk.DISABLED)
@@ -1315,7 +1384,7 @@ class CourseAutoApp:
 
         self.monitor_thread = threading.Thread(
             target=self.monitor_loop,
-            args=(interval, cooldown, popup_conf, btn_conf),
+            args=(interval, popup_conf, btn_conf, switch_delay),
             daemon=True
         )
         self.monitor_thread.start()
@@ -1336,7 +1405,7 @@ class CourseAutoApp:
         self.interval_entry.config(state=tk.NORMAL, bg="white")
         self.popup_conf_entry.config(state=tk.NORMAL, bg="white")
         self.btn_conf_entry.config(state=tk.NORMAL, bg="white")
-        self.play_cooldown_entry.config(state=tk.NORMAL, bg="white")
+        self.switch_delay_entry.config(state=tk.NORMAL, bg="white")
         self.play_mode_cb.config(state="readonly")
         self.auto_play_cb.config(state=tk.NORMAL)
         self.auto_record_cb.config(state=tk.NORMAL)
